@@ -40,7 +40,12 @@ This version merges the better pieces from both 0.2.0 variants:
    - no URLSession/NSURLConnection client code
    - generated Docker execution profiles use `--network none`
 
-6. **Disposable runner profile system**
+6. **DMG container inspection**
+   - accepts `.dmg` files for local inspection
+   - mounts disk images read-only for text and manifest analysis
+   - prefixes findings with the inner path so container contents stay readable
+
+7. **Disposable runner profile system**
    - Syntax Only
    - Docker Inspect
    - Temp Folder Review
@@ -118,6 +123,7 @@ examples/boring-demo.sh
 ```
 
 For dependency audit testing, choose a script in `examples/` so DexGate also sees adjacent `package.json` and `requirements.txt`.
+For DMG testing, choose a local `.dmg` that contains readable text files or manifests.
 
 ## Privacy model
 

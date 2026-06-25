@@ -31,7 +31,7 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("DexGate")
                     .font(.largeTitle.bold())
-                Text("Private local script inspection. No uploads. No hidden execution. Gate first, regret never.")
+                Text("Private local script and DMG inspection. No uploads. No hidden execution. Gate first, regret never.")
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -52,7 +52,7 @@ struct ContentView: View {
             Button {
                 model.chooseScriptFile()
             } label: {
-                Label("Choose Script", systemImage: "doc.badge.plus")
+                Label("Choose Script or DMG", systemImage: "doc.badge.plus")
                     .frame(maxWidth: .infinity)
             }
             .controlSize(.large)
@@ -116,10 +116,10 @@ struct ContentView: View {
             Image(systemName: "shield.lefthalf.filled.badge.checkmark")
                 .font(.system(size: 42))
                 .foregroundStyle(isDropTargeted ? .primary : .secondary)
-            Text(model.selectedURL?.lastPathComponent ?? "Drop a script here")
+            Text(model.selectedURL?.lastPathComponent ?? "Drop a script or DMG here")
                 .font(.headline)
                 .multilineTextAlignment(.center)
-            Text("Shell, Python, Node, Ruby, Perl, .command, or any text script")
+            Text("Shell, Python, Node, Ruby, Perl, .command, DMG, or any text script")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -172,7 +172,7 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                 Text("Choose or drop a script to inspect it locally.")
                     .font(.title2.bold())
-                Text("DexGate scores risk, highlights dangerous lines, suggests safer rewrites, audits nearby dependency manifests, enforces offline-first behavior, generates disposable runner profiles including trace mode, and exports private audit bundles. It still cannot prove safety. Nothing can. Annoying, but true.")
+                Text("DexGate scores risk, highlights dangerous lines, inspects DMG container contents when present, suggests safer rewrites, audits nearby dependency manifests, enforces offline-first behavior, generates disposable runner profiles including trace mode, and exports private audit bundles. It still cannot prove safety. Nothing can. Annoying, but true.")
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 720)
@@ -592,7 +592,7 @@ final class AppViewModel: ObservableObject {
 
     func chooseScriptFile() {
         let panel = NSOpenPanel()
-        panel.title = "Choose a script to inspect"
+        panel.title = "Choose a script or DMG to inspect"
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false

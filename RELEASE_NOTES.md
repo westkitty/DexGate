@@ -13,6 +13,7 @@ DexGate 0.3.0 compares the prior generated 0.2.0 source bundle against the uploa
 - Adopted the stronger point-based risk scoring model from the uploaded alternate version.
 - Kept the richer dependency manifest auditing from the uploaded alternate version.
 - Kept private audit bundle export with JSON evidence and checksums.
+- Added read-only DMG container inspection so disk images can be analyzed as local bundles instead of being treated like opaque binaries.
 - Added `RunnerProfileFactory.swift` to remove duplicate runner profile generation.
 - Expanded runner profiles to include:
   - Syntax Only
@@ -32,6 +33,7 @@ DexGate 0.3.0 compares the prior generated 0.2.0 source bundle against the uploa
 - Fixed a regex option mismatch in dependency manifest inspection.
 - Replaced invalid SwiftUI alignment and save-panel content-type constants with macOS-compatible equivalents.
 - Verified the package builds and the app bundle packages on macOS after those fixes.
+- Added DMG-specific analysis for mounted text and manifest files.
 
 ## Preserved features
 

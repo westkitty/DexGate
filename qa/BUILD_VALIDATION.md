@@ -18,6 +18,7 @@ Generated, compared, merged, and statically checked in a non-macOS Linux runtime
 | Native macOS build | pass | `swift build -c release` completed successfully on macOS after small source compatibility fixes. |
 | Linux `swift build` | expected fail | Fails at `import AppKit`, which is expected outside macOS. See `qa/linux_swift_build_attempt.log`. |
 | Package bundle build | pass | `bash scripts/build_app.sh` produced `dist/DexGate.app`, `dist/DexGate-macOS-unsigned.zip`, and `dist/CHECKSUMS.sha256`. |
+| DMG container inspection | not tested here | The code path was added and rebuilt, but no live `.dmg` sample was exercised in this session. |
 | GUI launch | partial | `open dist/DexGate.app` launched the app process, but no interactive window-level smoke test was performed here. |
 | Signing/notarization | not performed | Build script only performs ad-hoc signing when available; no Developer ID signing or notarization was done. |
 

@@ -15,20 +15,18 @@ final class ScriptAnalyzer {
         let fileName = url.lastPathComponent
         let data = (try? Data(contentsOf: url, options: [.mappedIfSafe])) ?? Data()
         let limitedData = Data(data.prefix(maxReadBytes))
-        let text = String(data: limitedData, encoding: .utf8)
-            ?? String(data: limitedData, encoding: .ascii)
-            ?? "[DexGate could not decode this file as UTF-8 or ASCII text.]"
         let sha = Self.sha256(data: data)
-        let lineCount = text.split(whereSeparator: \.isNewline).count
-        let interpreter = Self.detectInterpreter(fileName: fileName, text: text)
         let ext = url.pathExtension.isEmpty ? "none" : url.pathExtension.lowercased()
-        let findings = scanText(text)
-        let dependencyFindings = scanAdjacentDependencies(for: url)
-        let riskScore = RiskScorer.score(findings: findings, dependencyFindings: dependencyFindings)
-        let suggestions = Self.buildRewriteSuggestions(findings: findings, dependencyFindings: dependencyFindings)
+
+        let analysis = isDiskImage(url)
+            ? analyzeDiskImage(url: url)
+            : analyzeRegularFile(url: url, limitedData: limitedData, fileName: fileName)
+
+        let riskScore = RiskScorer.score(findings: analysis.findings, dependencyFindings: analysis.dependencyFindings)
+        let suggestions = Self.buildRewriteSuggestions(findings: analysis.findings, dependencyFindings: analysis.dependencyFindings)
         let syntaxToolResults: [CommandResult]
-        if includeLocalToolResults {
-            syntaxToolResults = LocalCommandRunner.runStaticTools(for: url, interpreter: interpreter)
+        if includeLocalToolResults && !analysis.isContainer {
+            syntaxToolResults = LocalCommandRunner.runStaticTools(for: url, interpreter: analysis.interpreter)
         } else {
             syntaxToolResults = []
         }
@@ -38,12 +36,12 @@ final class ScriptAnalyzer {
             fileName: fileName,
             fileSizeDescription: ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file),
             sha256: sha,
-            interpreter: interpreter,
+            interpreter: analysis.interpreter,
             extensionType: ext,
-            lineCount: lineCount,
-            readableText: text,
-            findings: findings,
-            dependencyFindings: dependencyFindings,
+            lineCount: analysis.lineCount,
+            readableText: analysis.readableText,
+            findings: analysis.findings,
+            dependencyFindings: analysis.dependencyFindings,
             syntaxToolResults: syntaxToolResults,
             riskScore: riskScore,
             safeRewriteSuggestions: suggestions,
@@ -51,7 +49,143 @@ final class ScriptAnalyzer {
         )
     }
 
-    private func scanText(_ text: String) -> [Finding] {
+    private func analyzeRegularFile(url: URL, limitedData: Data, fileName: String) -> (interpreter: String, lineCount: Int, readableText: String, findings: [Finding], dependencyFindings: [DependencyFinding], isContainer: Bool) {
+        let text = Self.decodeText(from: limitedData)
+        let interpreter = Self.detectInterpreter(fileName: fileName, text: text)
+        let lineCount = text.split(whereSeparator: \.isNewline).count
+        let findings = scanText(text)
+        let dependencyFindings = scanAdjacentDependencies(for: url)
+        return (interpreter: interpreter, lineCount: lineCount, readableText: text, findings: findings, dependencyFindings: dependencyFindings, isContainer: false)
+    }
+
+    private func analyzeDiskImage(url: URL) -> (interpreter: String, lineCount: Int, readableText: String, findings: [Finding], dependencyFindings: [DependencyFinding], isContainer: Bool) {
+        var readableSections: [String] = []
+        let mountPoint = makeTemporaryMountPoint()
+        var mounted = false
+
+        defer {
+            if mounted {
+                _ = runProcess("/usr/bin/hdiutil", arguments: ["detach", mountPoint.path, "-quiet"])
+            }
+            try? FileManager.default.removeItem(at: mountPoint)
+        }
+
+        do {
+            try FileManager.default.createDirectory(at: mountPoint, withIntermediateDirectories: true)
+        } catch {
+            return (
+                interpreter: "disk image",
+                lineCount: 0,
+                readableText: "DexGate could not prepare a temporary mount point: \(error.localizedDescription)",
+                findings: [
+                    Finding(
+                        ruleID: "DMG-001",
+                        title: "Disk image could not be analyzed",
+                        severity: .medium,
+                        category: .other,
+                        lineNumber: 1,
+                        linePreview: error.localizedDescription,
+                        explanation: "DexGate could not mount the disk image for container inspection.",
+                        recommendation: "Open the DMG manually and inspect its contents before trusting it.",
+                        points: RiskScorer.points(for: .medium, category: .other)
+                    )
+                ],
+                dependencyFindings: [],
+                isContainer: true
+            )
+        }
+
+        let attach = runProcess("/usr/bin/hdiutil", arguments: ["attach", "-readonly", "-nobrowse", "-noautoopen", "-noverify", "-mountpoint", mountPoint.path, url.path])
+        if attach.status != 0 {
+            readableSections.append("DMG mount failed")
+            readableSections.append(attach.output.isEmpty ? "hdiutil attach returned \(attach.status)." : attach.output)
+            return (
+                interpreter: "disk image",
+                lineCount: readableSections.joined(separator: "\n").split(whereSeparator: \.isNewline).count,
+                readableText: readableSections.joined(separator: "\n\n"),
+                findings: [
+                    Finding(
+                        ruleID: "DMG-001",
+                        title: "Disk image could not be mounted",
+                        severity: .medium,
+                        category: .other,
+                        lineNumber: 1,
+                        linePreview: attach.output.isEmpty ? "hdiutil attach returned \(attach.status)." : Self.trim(attach.output, limit: 240),
+                        explanation: "DexGate could not mount the DMG for read-only inspection.",
+                        recommendation: "Inspect the DMG in Finder or with hdiutil before trusting its payload.",
+                        points: RiskScorer.points(for: .medium, category: .other)
+                    )
+                ],
+                dependencyFindings: [],
+                isContainer: true
+            )
+        }
+        mounted = true
+
+        let imageInfo = runProcess("/usr/bin/hdiutil", arguments: ["imageinfo", url.path])
+        readableSections.append("Disk image: \(url.lastPathComponent)")
+        readableSections.append("Mount point: \(mountPoint.path)")
+        if imageInfo.status == 0, !imageInfo.output.isEmpty {
+            readableSections.append("hdiutil imageinfo")
+            readableSections.append(Self.trim(imageInfo.output, limit: 6000))
+        } else if !imageInfo.output.isEmpty {
+            readableSections.append("hdiutil imageinfo failed")
+            readableSections.append(Self.trim(imageInfo.output, limit: 4000))
+        }
+
+        var textCorpus: [String] = []
+        var findings: [Finding] = []
+        var dependencyFindings: [DependencyFinding] = []
+        let interestingNames: Set<String> = ["package.json", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", ".npmrc", "requirements.txt", "pyproject.toml", "setup.py", "Cargo.toml", "go.mod", "Gemfile", "Makefile", "Dockerfile", "docker-compose.yml", "compose.yml", "Taskfile.yml", "Taskfile.yaml"]
+        let textExtensions: Set<String> = ["sh", "bash", "zsh", "py", "js", "mjs", "cjs", "rb", "pl", "command", "txt", "md", "json", "yaml", "yml", "toml", "plist", "xml", "cfg", "ini", "lock"]
+
+        if let enumerator = FileManager.default.enumerator(at: mountPoint, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey], options: [.skipsHiddenFiles]) {
+            var scannedCount = 0
+            for case let fileURL as URL in enumerator {
+                guard scannedCount < 200 else { break }
+                guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]), values.isRegularFile == true else { continue }
+                let relativePath = fileURL.path.replacingOccurrences(of: mountPoint.path + "/", with: "")
+                let fileName = fileURL.lastPathComponent
+                let ext = fileURL.pathExtension.lowercased()
+                let shouldInspect = interestingNames.contains(fileName) || textExtensions.contains(ext) || fileName == "Makefile" || fileName == "Dockerfile" || fileName == "Gemfile" || fileName == "go.mod" || fileName == "Cargo.toml"
+                guard shouldInspect else { continue }
+
+                let fileData = (try? Data(contentsOf: fileURL, options: [.mappedIfSafe])) ?? Data()
+                guard !fileData.isEmpty else { continue }
+                let decoded = Self.decodeText(from: Data(fileData.prefix(256_000)))
+                scannedCount += 1
+                textCorpus.append("=== \(relativePath) ===\n\(decoded)")
+                findings.append(contentsOf: scanText(decoded, sourceLabel: relativePath))
+
+                if interestingNames.contains(fileName) || fileName == "Makefile" || fileName == "Dockerfile" || fileName == "Gemfile" || fileName == "go.mod" || fileName == "Cargo.toml" || fileName == "requirements.txt" || fileName == "pyproject.toml" || fileName == "setup.py" {
+                    dependencyFindings.append(contentsOf: scanAdjacentDependencies(for: fileURL))
+                }
+            }
+        }
+
+        if textCorpus.isEmpty {
+            textCorpus.append("Disk image mounted but no readable text files were found in the first inspection pass.")
+        }
+
+        readableSections.append(textCorpus.joined(separator: "\n\n"))
+        readableSections.append("Container findings were gathered from readable files inside the mounted image. Binary payloads are not executed.")
+
+        let lineCount = readableSections.joined(separator: "\n").split(whereSeparator: \.isNewline).count
+        return (
+            interpreter: "disk image",
+            lineCount: lineCount,
+            readableText: readableSections.joined(separator: "\n\n"),
+            findings: findings.sorted { left, right in
+                if left.severity != right.severity { return left.severity > right.severity }
+                if left.lineNumber != right.lineNumber { return left.lineNumber < right.lineNumber }
+                return left.ruleID < right.ruleID
+            },
+            dependencyFindings: Self.deduplicateDependencyFindings(dependencyFindings),
+            isContainer: true
+        )
+    }
+
+    private func scanText(_ text: String, sourceLabel: String? = nil) -> [Finding] {
         let lines = text.components(separatedBy: .newlines)
         var findings: [Finding] = []
 
@@ -68,7 +202,7 @@ final class ScriptAnalyzer {
                             severity: rule.severity,
                             category: rule.category,
                             lineNumber: index + 1,
-                            linePreview: Self.trim(line, limit: 240),
+                            linePreview: sourceLabel.map { "\($0): \(Self.trim(line, limit: 200))" } ?? Self.trim(line, limit: 240),
                             explanation: rule.explanation,
                             recommendation: rule.recommendation,
                             points: points
@@ -82,6 +216,20 @@ final class ScriptAnalyzer {
             if left.severity != right.severity { return left.severity > right.severity }
             if left.lineNumber != right.lineNumber { return left.lineNumber < right.lineNumber }
             return left.ruleID < right.ruleID
+        }
+    }
+
+    private static func deduplicateDependencyFindings(_ findings: [DependencyFinding]) -> [DependencyFinding] {
+        var seen = Set<String>()
+        return findings.filter { finding in
+            let key = "\(finding.fileName)|\(finding.title)|\(finding.detail)|\(finding.recommendation)"
+            if seen.contains(key) { return false }
+            seen.insert(key)
+            return true
+        }.sorted { left, right in
+            if left.severity != right.severity { return left.severity > right.severity }
+            if left.fileName != right.fileName { return left.fileName < right.fileName }
+            return left.title < right.title
         }
     }
 
@@ -198,6 +346,41 @@ final class ScriptAnalyzer {
         let title: String
         let detail: String
         let recommendation: String
+    }
+
+    private func isDiskImage(_ url: URL) -> Bool {
+        url.pathExtension.lowercased() == "dmg"
+    }
+
+    private func makeTemporaryMountPoint() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("dexgate-dmg-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    private static func decodeText(from data: Data) -> String {
+        String(data: data, encoding: .utf8)
+            ?? String(data: data, encoding: .ascii)
+            ?? "[DexGate could not decode this file as UTF-8 or ASCII text.]"
+    }
+
+    private func runProcess(_ launchPath: String, arguments: [String]) -> (status: Int32, output: String) {
+        let process = Process()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.executableURL = URL(fileURLWithPath: launchPath)
+        process.arguments = arguments
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let out = String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let err = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let combined = [out, err].filter { !$0.isEmpty }.joined(separator: "\n")
+            return (process.terminationStatus, combined)
+        } catch {
+            return (-1, error.localizedDescription)
+        }
     }
 
     private func inspectTextManifest(_ url: URL, fileName: String, checks: [ManifestCheck]) -> [DependencyFinding] {

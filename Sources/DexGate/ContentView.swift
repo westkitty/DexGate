@@ -67,6 +67,16 @@ struct ContentView: View {
             .disabled(model.selectedURL == nil || model.isAnalyzing)
 
             Button {
+                model.clearSelection()
+                selectedRunnerProfileIndex = 0
+            } label: {
+                Label("Clear Selection", systemImage: "xmark.circle")
+                    .frame(maxWidth: .infinity)
+            }
+            .controlSize(.large)
+            .disabled((model.selectedURL == nil && model.report == nil) || model.isAnalyzing)
+
+            Button {
                 model.analyzeSelected(includeLocalTools: true)
             } label: {
                 Label("Run Local Static Tools", systemImage: "terminal")
@@ -589,6 +599,7 @@ final class AppViewModel: ObservableObject {
     @Published var offlineLockEnabled = true
 
     private let analyzer = ScriptAnalyzer()
+    private var activeAnalysisID = UUID()
 
     func chooseScriptFile() {
         let panel = NSOpenPanel()
@@ -630,14 +641,26 @@ final class AppViewModel: ObservableObject {
 
     func analyzeSelected(includeLocalTools: Bool) {
         guard let selectedURL else { return }
+        let url = selectedURL
+        let analysisID = UUID()
+        activeAnalysisID = analysisID
         isAnalyzing = true
         Task {
-            let newReport = await analyzer.analyze(url: selectedURL, includeLocalToolResults: includeLocalTools)
+            let newReport = await analyzer.analyze(url: url, includeLocalToolResults: includeLocalTools)
             await MainActor.run {
+                guard self.activeAnalysisID == analysisID, self.selectedURL == url else { return }
                 self.report = newReport
                 self.isAnalyzing = false
             }
         }
+    }
+
+    func clearSelection() {
+        activeAnalysisID = UUID()
+        selectedURL = nil
+        report = nil
+        isAnalyzing = false
+        errorMessage = nil
     }
 
     func exportMarkdownReport() {

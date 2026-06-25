@@ -44,6 +44,7 @@ This version merges the better pieces from both 0.2.0 variants:
    - accepts `.dmg` files for local inspection
    - mounts disk images read-only for text and manifest analysis
    - prefixes findings with the inner path so container contents stay readable
+   - includes a clear-selection action so you can empty the current item and start over
 
 7. **Disposable runner profile system**
    - Syntax Only

@@ -14,6 +14,7 @@ DexGate 0.3.0 compares the prior generated 0.2.0 source bundle against the uploa
 - Kept the richer dependency manifest auditing from the uploaded alternate version.
 - Kept private audit bundle export with JSON evidence and checksums.
 - Added read-only DMG container inspection so disk images can be analyzed as local bundles instead of being treated like opaque binaries.
+- Added a clear-selection action so the current file can be emptied and reselected safely.
 - Added `RunnerProfileFactory.swift` to remove duplicate runner profile generation.
 - Expanded runner profiles to include:
   - Syntax Only

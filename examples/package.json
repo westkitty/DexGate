@@ -1,0 +1,12 @@
+{
+  "name": "dexgate-risk-fixture",
+  "version": "0.0.1",
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js",
+    "test": "node --check index.js"
+  },
+  "dependencies": {
+    "left-pad": "^1.3.0",
+    "private-tool": "git+https://example.invalid/private-tool.git"
+  }
+}

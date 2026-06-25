@@ -1,0 +1,4 @@
+requests
+--extra-index-url https://example.invalid/simple
+some-private-pkg==1.2.3
+other @ git+https://example.invalid/other.git
